@@ -1,6 +1,8 @@
 #!bin/python
 
-import random
+# Uses https://github.com/cmcqueen/simplerandom
+import simplerandom.random as srr
+import binascii
 from base64 import b64encode
 import os
 
@@ -63,9 +65,9 @@ def babydes_dec(prf, width, key, ciphertext):
 
 # Non cryptographycally secure PRF
 def prf(width, key, roundn, datain):
-	random.seed(key + str(roundn))
-	random.jumpahead(datain)
-	return bytearray(random.getrandbits(8) for x in xrange(width))
+	rng = srr.KISS(key + str(roundn))
+	rng.jumpahead(int(binascii.hexlify(datain), 16))
+	return bytearray(rng.getrandbits(8) for x in xrange(width))
 
 text = os.urandom(32)
 key = os.urandom(32)
