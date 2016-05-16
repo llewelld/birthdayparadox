@@ -8,7 +8,7 @@ import os
 # Variable length Feistel cipher
 # Only as secure as the PRF you give it
 def babydes_enc(prf, width, key, cleartext):
-	assert width % 2 == 0, 'width must be multiple of two.'
+	assert width % 2 == 0, 'Width must be multiple of two.'
 	assert width == len(cleartext), 'Cleartext must have length width'
 	halfwidth = width / 2
 	left = bytearray(cleartext[:halfwidth])
@@ -16,17 +16,17 @@ def babydes_enc(prf, width, key, cleartext):
 	keybytes = bytearray(key)
 
 	# Round 1
-	bitstream = prf(halfwidth, key, right)
+	bitstream = prf(halfwidth, key, 0, right)
 	for pos in range(halfwidth):
 		left[pos] ^= bitstream[pos]
 
 	# Round 2
-	bitstream = prf(halfwidth, key, left)
+	bitstream = prf(halfwidth, key, 1, left)
 	for pos in range(halfwidth):
 		right[pos] ^= bitstream[pos]
 
 	# Round 3
-	bitstream = prf(halfwidth, key, right)
+	bitstream = prf(halfwidth, key, 2, right)
 	for pos in range(halfwidth):
 		left[pos] ^= bitstream[pos]
 
@@ -36,7 +36,7 @@ def babydes_enc(prf, width, key, cleartext):
 # Variable length Feistel cipher
 # Only as secure as the PRF you give it
 def babydes_dec(prf, width, key, ciphertext):
-	assert width % 2 == 0, 'width must be multiple of two.'
+	assert width % 2 == 0, 'Width must be multiple of two.'
 	assert width == len(ciphertext), 'Ciphertext must have length width'
 	halfwidth = width / 2
 	left = bytearray(ciphertext[:halfwidth])
@@ -44,17 +44,17 @@ def babydes_dec(prf, width, key, ciphertext):
 	keybytes = bytearray(key)
 
 	# Round 1
-	bitstream = prf(halfwidth, key, right)
+	bitstream = prf(halfwidth, key, 2, right)
 	for pos in range(halfwidth):
 		left[pos] ^= bitstream[pos]
 
 	# Round 2
-	bitstream = prf(halfwidth, key, left)
+	bitstream = prf(halfwidth, key, 1, left)
 	for pos in range(halfwidth):
 		right[pos] ^= bitstream[pos]
 
 	# Round 3
-	bitstream = prf(halfwidth, key, right)
+	bitstream = prf(halfwidth, key, 0, right)
 	for pos in range(halfwidth):
 		left[pos] ^= bitstream[pos]
 
@@ -62,8 +62,8 @@ def babydes_dec(prf, width, key, ciphertext):
 
 
 # Non cryptographycally secure PRF
-def prf(width, key, datain):
-	random.seed(key)
+def prf(width, key, roundn, datain):
+	random.seed(key + str(roundn))
 	random.jumpahead(datain)
 	return bytearray(random.getrandbits(8) for x in xrange(width))
 
