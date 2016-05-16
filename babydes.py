@@ -1,8 +1,11 @@
 #!bin/python
 
 # Uses https://github.com/cmcqueen/simplerandom
-import simplerandom.random as srr
+import simplerandom.iterators as srr
 import binascii
+from base64 import b64encode
+import math
+import struct
 
 # BabyDES encrypt
 # Variable length Feistel cipher
@@ -13,7 +16,6 @@ def babydes_enc(prf, width, key, cleartext):
 	halfwidth = width / 2
 	left = bytearray(cleartext[:halfwidth])
 	right = bytearray(cleartext[halfwidth:])
-	keybytes = bytearray(key)
 
 	# Round 1
 	bitstream = prf(halfwidth, key, 0, right)
@@ -41,7 +43,6 @@ def babydes_dec(prf, width, key, ciphertext):
 	halfwidth = width / 2
 	left = bytearray(ciphertext[:halfwidth])
 	right = bytearray(ciphertext[halfwidth:])
-	keybytes = bytearray(key)
 
 	# Round 1
 	bitstream = prf(halfwidth, key, 2, right)
@@ -60,11 +61,34 @@ def babydes_dec(prf, width, key, ciphertext):
 
 	return left + right
 
-
 # Non cryptographycally secure PRF
-def prf(width, key, roundn, datain):
-	rng = srr.KISS(key + str(roundn))
-	rng.jumpahead(int(binascii.hexlify(datain), 16))
-	return bytearray(rng.getrandbits(8) for x in xrange(width))
+def random(width, key, roundn, datain):
+	# Create as many random number sequences as we can get away with
+	keys = len(key)
+	rngnum = int((keys + 3) / 4);
+	rng = []
+	for count in range(rngnum):
+		shift = count + roundn
+		rng.append(srr.KISS(key[shift % keys], key[(shift + 1) % keys], key[(shift + 2) % keys], key[(shift + 3) % keys]))
 
+	bufferout = bytearray()
+	# Select output bytes as they come out of thee random number generators
+	for x in range(width):
+		if x % 4 == 0:
+			random = sum(next(y) for y in rng)
+		# Ensure output depends on input
+		rng[x % rngnum].jumpahead(datain[x])
+		random += next(rng[x % rngnum])
+		bufferout.append((random >> ((x % 4) * 8)) & 0xff)
+
+	return bufferout
+
+# Create a key sequence from a string
+def create_key(key):
+	if len(key) % 4 != 0:
+		key += '\x00' * (4 - (len(key) % 4))
+	keydata = []
+	for pos in range(0, len(key), 4):
+		keydata.append(struct.unpack("<L", key[pos:pos + 4])[0])
+	return keydata
 

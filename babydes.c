@@ -1,34 +1,102 @@
-// Uses https://github.com/cmcqueen/simplerandom
+// Uses simplerandom https://github.com/cmcqueen/simplerandom
+// Uses libb64 https://sourceforge.net/projects/libb64/
 #include <stdio.h>
 #include <string.h>
 #include <malloc.h>
 #include <simplerandom.h>
+#include <b64/cencode.h>
 
 // gcc babydes.c -I/usr/local/include/simplerandom-0.12.1 -L/usr/local/lib -lsimplerandom-0.12.1 -static -o babydes
+// gcc babydes.c -I/usr/local/include/simplerandom-0.12.1 -L/usr/local/lib -lsimplerandom-0.12.1 -lb64 -static -o babydes
 
-typedef void (*Prf)(unsigned int width, char * key, int keylen, unsigned short roundn, unsigned char * bufferin, unsigned char * bufferout);
+typedef struct {
+	uint32_t * key;
+	unsigned int keylen;
+} KeyStructure;
 
-void random(unsigned int width, char * key, int keylen, unsigned short roundn, unsigned char * bufferin, unsigned char * bufferout) {
-/*
-	static SimpleRandomKISS_t rng_kiss;
-	uint32_t seed_array[8] = { 1, 2, 3, 4, 5, 6, 7, 8 };
-	simplerandom_kiss_seed_array(&rng_kiss, seed_array, 8, true);
-	simplerandom_kiss_discard(&rng_kiss, 1000000000000uLL);
-	uint32_t rng_values_array[8];
-	int i;
+typedef void (*Prf)(unsigned int width, KeyStructure * key, unsigned short roundn, unsigned char * bufferin, unsigned char * bufferout);
 
-	for (i = 0; i < 8; ++i) {
-		rng_values_array[i] = simplerandom_kiss_next(&rng_kiss);
-		printf ("Output: %u\n", rng_values_array[i]);
+KeyStructure * create_key(unsigned char * key, unsigned int keylen);
+void destroy_key(KeyStructure * key);
+
+// Non cryptographycally secure PRF
+void random(unsigned int width, KeyStructure * key, unsigned short roundn, unsigned char * bufferin, unsigned char * bufferout) {
+	SimpleRandomKISS_t * rng_kiss;
+	uint32_t random;
+	unsigned int pos;
+	unsigned int rngnum;
+	unsigned int count;
+	unsigned int shift;
+
+	// Create as many random number sequences as we can get away with
+	rngnum = ((key->keylen + 3) / 4);
+	rng_kiss = malloc(sizeof(SimpleRandomKISS_t) * rngnum);
+	for (count = 0; count < rngnum; count++) {
+		shift = count + roundn;
+		simplerandom_kiss_seed(&rng_kiss[count], key->key[shift % key->keylen], key->key[(shift + 1) % key->keylen], key->key[(shift + 2) % key->keylen], key->key[(shift + 3) % key->keylen]);
 	}
-*/
-	int pos;
+
+	// Select output bytes as they come out of thee random number generators
 	for (pos = 0; pos < width; pos++) {
-		bufferout[pos] = (roundn + pos + key[pos % keylen] + bufferin[pos]) & 0xff;
+		if (pos % 4 == 0) {
+			random = 0;
+			for (count = 0; count < rngnum; count++) {
+				random += simplerandom_kiss_next(&rng_kiss[count]);
+			}
+		}
+		// Ensure output depends on input
+		simplerandom_kiss_discard(&rng_kiss[pos % rngnum], bufferin[pos]);
+		random += simplerandom_kiss_next(&rng_kiss[pos % rngnum]);
+		bufferout[pos] = ((unsigned char *)& random)[pos % 4];
 	}
+	
+	// Free up the RNG structures (can we keep them? Unfortunately we can't)
+	free(rng_kiss);
 }
 
-void babydes_enc(Prf prf, unsigned int width, char * key, unsigned int keylen, unsigned char * bufferin, unsigned char * bufferout) {
+// BabyDES encrypt
+// Variable length Feistel cipher
+// Only as secure as the PRF you give it
+void babydes_enc(Prf prf, unsigned int width, KeyStructure * key, unsigned char * bufferin, unsigned char * bufferout) {
+	unsigned int halfwidth;
+	unsigned char * left;
+	unsigned char * right;
+	unsigned char * bitstream;
+	int pos;
+	base64_encodestate state_in;
+
+	halfwidth = width / 2;
+	left = bufferout;
+	right = bufferout + halfwidth;
+	memcpy(left, bufferin, halfwidth);
+	memcpy(right, bufferin + halfwidth, halfwidth);
+	bitstream = malloc(halfwidth);
+
+	// Round 1
+	prf(halfwidth, key, 0, right, bitstream);
+	for (pos = 0; pos < halfwidth; pos++) {
+		left[pos] ^= bitstream[pos];
+	}
+
+	// Round 2
+	prf(halfwidth, key, 1, left, bitstream);
+	for (pos = 0; pos < halfwidth; pos++) {
+		right[pos] ^= bitstream[pos];
+	}
+
+	// Round 3
+	prf(halfwidth, key, 2, right, bitstream);
+	for (pos = 0; pos < halfwidth; pos++) {
+		left[pos] ^= bitstream[pos];
+	}
+	
+	free(bitstream);
+}
+
+// BabyDES decrypt
+// Variable length Feistel cipher
+// Only as secure as the PRF you give it
+void babydes_dec(Prf prf, unsigned int width, KeyStructure * key, unsigned char * bufferin, unsigned char * bufferout) {
 	unsigned int halfwidth;
 	unsigned char * left;
 	unsigned char * right;
@@ -43,19 +111,19 @@ void babydes_enc(Prf prf, unsigned int width, char * key, unsigned int keylen, u
 	bitstream = malloc(halfwidth);
 
 	// Round 1
-	prf(halfwidth, key, keylen, 0, right, bitstream);
+	prf(halfwidth, key, 2, right, bitstream);
 	for (pos = 0; pos < halfwidth; pos++) {
 		left[pos] ^= bitstream[pos];
 	}
 
 	// Round 2
-	prf(halfwidth, key, keylen, 1, left, bitstream);
+	prf(halfwidth, key, 1, left, bitstream);
 	for (pos = 0; pos < halfwidth; pos++) {
 		right[pos] ^= bitstream[pos];
 	}
 
 	// Round 3
-	prf(halfwidth, key, keylen, 2, right, bitstream);
+	prf(halfwidth, key, 0, right, bitstream);
 	for (pos = 0; pos < halfwidth; pos++) {
 		left[pos] ^= bitstream[pos];
 	}
@@ -63,55 +131,56 @@ void babydes_enc(Prf prf, unsigned int width, char * key, unsigned int keylen, u
 	free(bitstream);
 }
 
-void babydes_dec(Prf prf, unsigned int width, char * key, unsigned int keylen, unsigned char * bufferin, unsigned char * bufferout) {
-	unsigned int halfwidth;
-	unsigned char * left;
-	unsigned char * right;
-	unsigned char * bitstream;
-	int pos;
+// Create a key from a string
+KeyStructure * create_key(unsigned char * key, unsigned int keylen) {
+	int intlen;
 
-	halfwidth = width / 2;
-	left = bufferout;
-	right = bufferout + halfwidth;
-	memcpy(left, bufferin, halfwidth);
-	memcpy(right, bufferin + halfwidth, halfwidth);
-	bitstream = malloc(halfwidth);
+	KeyStructure * keydata;
+	keydata = calloc(sizeof(KeyStructure), 1);
 
-	// Round 1
-	prf(halfwidth, key, keylen, 2, right, bitstream);
-	for (pos = 0; pos < halfwidth; pos++) {
-		left[pos] ^= bitstream[pos];
-	}
+	intlen = ((keylen + 3) / 4);
 
-	// Round 2
-	prf(halfwidth, key, keylen, 1, left, bitstream);
-	for (pos = 0; pos < halfwidth; pos++) {
-		right[pos] ^= bitstream[pos];
-	}
+	keydata->key = calloc(sizeof(uint32_t), intlen);
+	memcpy(keydata->key, key, keylen);
 
-	// Round 3
-	prf(halfwidth, key, keylen, 0, right, bitstream);
-	for (pos = 0; pos < halfwidth; pos++) {
-		left[pos] ^= bitstream[pos];
-	}
+	keydata->keylen = intlen;
 	
-	free(bitstream);
+	return keydata;
+}
+
+// Free up the memory associated with the key
+void destroy_key(KeyStructure * key) {
+	if (key != NULL) {
+		if (key->key != NULL) {
+			free(key->key);
+		}
+		free(key);
+	}
 }
 
 void main () {
 	unsigned char buffer[21];
-	unsigned char * key = "hello";
-	unsigned int keylen;
+	char * keytext = "abcdabcdabcdabcda";
+	base64_encodestate state_in;
+	char b64encoded[100];
+	KeyStructure * key;
 
-	keylen = strlen(key);
+	key = create_key(keytext, strlen(keytext));
+
 	strncpy(buffer, "abcdefghijklmnopqrst", 20);
 	buffer[20] = 0;
-	printf ("In: %s\n", buffer);
+	printf ("Txt: %s\n", buffer);
 
-	babydes_enc(random, 20, key, keylen, buffer, buffer);
-	printf ("Out: %s\n", buffer);
+	babydes_enc(random, 20, key, buffer, buffer);
 
-	babydes_dec(random, 20, key, keylen, buffer, buffer);
-	printf ("Final: %s\n", buffer);
+	base64_init_encodestate(& state_in);
+	int count = base64_encode_block(buffer, 20, b64encoded, & state_in);
+	base64_encode_blockend(b64encoded + count, & state_in);
+	printf ("Enc: %s", b64encoded);
+
+	babydes_dec(random, 20, key, buffer, buffer);
+	printf ("Dec: %s\n", buffer);
+
+	destroy_key(key);
 }
 
