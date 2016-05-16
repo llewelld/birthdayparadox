@@ -3,8 +3,6 @@
 # Uses https://github.com/cmcqueen/simplerandom
 import simplerandom.random as srr
 import binascii
-from base64 import b64encode
-import os
 
 # BabyDES encrypt
 # Variable length Feistel cipher
@@ -69,10 +67,4 @@ def prf(width, key, roundn, datain):
 	rng.jumpahead(int(binascii.hexlify(datain), 16))
 	return bytearray(rng.getrandbits(8) for x in xrange(width))
 
-text = os.urandom(32)
-key = os.urandom(32)
-ciphertext = babydes_enc(prf, len(text), key, text)
-#print base64.b64encode(ciphertext)
-plaintext = babydes_dec(prf, len(text), key, ciphertext)
-print '{}: {} =?= {}'.format('Success' if plaintext == text else 'Failure', b64encode(plaintext), b64encode(text))
 
