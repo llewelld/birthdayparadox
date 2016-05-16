@@ -39,7 +39,7 @@ void random(unsigned int width, KeyStructure const * key, unsigned short roundn,
 			}
 		}
 		// Ensure output depends on input
-		simplerandom_kiss_discard(&rng_kiss[pos % rngnum], bufferin[pos]);
+		simplerandom_kiss_discard(&rng_kiss[pos % rngnum], (unsigned char)bufferin[pos]);
 		random += simplerandom_kiss_next(&rng_kiss[pos % rngnum]);
 		bufferout[pos] = ((char *)& random)[pos % 4];
 	}
@@ -137,7 +137,7 @@ KeyStructure * create_key(char const * key, unsigned int keylen) {
 	memcpy(keydata->key, key, keylen);
 
 	keydata->keylen = intlen;
-	
+
 	return keydata;
 }
 
