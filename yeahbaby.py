@@ -21,3 +21,11 @@ print 'Enc: {}'.format(b64encode(ciphertext))
 plaintext = babydes_dec(random, len(text), key, ciphertext)
 print 'Dec: {}'.format(plaintext)
 
+# Timing
+# Perform 1000 encryptions and decryptions
+for count in range(1000):
+	text = os.urandom(128)
+	ciphertext = babydes_enc(random, len(text), key, text)
+	plaintext = babydes_dec(random, len(text), key, ciphertext)
+	assert text == plaintext, "Txt and Dec do not match:\n{}\n{}".format(text, plaintext)
+
